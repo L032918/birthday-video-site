@@ -12,6 +12,9 @@ cloudflared.exe
 videos_backup_original/
 videos_backup/
 
+# 原始大视频（只上传压缩版 videos/web/）
+videos/*.mp4
+
 # Old/unused HTML files
 birthday.html
 mobile.html

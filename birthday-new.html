@@ -481,15 +481,15 @@ html,body{
    数据配置：9 位男主
    ======================================================== */
 const LEADS = [
-  {id:'qinche',   name:'秦彻',   color:'#b8860b', video:'videos/秦彻.mp4'},
-  {id:'qiyu',     name:'祁煜',   color:'#8b5cf6', video:'videos/祁煜.mp4'},
-  {id:'gushiy',   name:'顾时夜', color:'#67b8d4', video:'videos/顾时夜.mp4'},
-  {id:'qisili',   name:'齐司礼', color:'#4caf50', video:'videos/齐司礼.mp4'},
-  {id:'xiaoyi',   name:'萧逸',   color:'#e53935', video:'videos/萧逸.mp4'},
-  {id:'xiaoyin',  name:'夏萧因', color:'#b0b8c0', video:'videos/夏萧因.mp4'},
-  {id:'lizeyan',  name:'李泽言', color:'#1565c0', video:'videos/李泽言.mp4'},
-  {id:'zuoran',   name:'左然',   color:'#8d6e63', video:'videos/左然.mp4'},
-  {id:'lujinghe', name:'陆景和', color:'#ce93d8', video:'videos/陆景和.mp4'}
+  {id:'qinche',   name:'秦彻',   color:'#b8860b', video:'videos/web/秦彻.mp4'},
+  {id:'qiyu',     name:'祁煜',   color:'#8b5cf6', video:'videos/web/祁煜.mp4'},
+  {id:'gushiy',   name:'顾时夜', color:'#67b8d4', video:'videos/web/顾时夜.mp4'},
+  {id:'qisili',   name:'齐司礼', color:'#4caf50', video:'videos/web/齐司礼.mp4'},
+  {id:'xiaoyi',   name:'萧逸',   color:'#e53935', video:'videos/web/萧逸.mp4'},
+  {id:'xiaoyin',  name:'夏萧因', color:'#b0b8c0', video:'videos/web/夏萧因.mp4'},
+  {id:'lizeyan',  name:'李泽言', color:'#1565c0', video:'videos/web/李泽言.mp4'},
+  {id:'zuoran',   name:'左然',   color:'#8d6e63', video:'videos/web/左然.mp4'},
+  {id:'lujinghe', name:'陆景和', color:'#ce93d8', video:'videos/web/陆景和.mp4'}
 ];
 
 const STORAGE_KEY = 'mario_birthday_progress_v2';
@@ -503,6 +503,7 @@ let fwActive = false;      // 烟花是否激活
 let audioCtx = null;       // 音频上下文
 let videoLoadToken = 0;    // 视频加载令牌（防止并发）
 let videoLoadTimer = null; // 加载进度定时器
+let videoCleanup = null;   // 视频事件监听器清理函数
 
 const isMobile = /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent);
 const $ = id => document.getElementById(id);
@@ -742,101 +743,72 @@ function loadAndPlay(idx) {
   const lead = LEADS[idx];
   const token = ++videoLoadToken;
 
+  // 清理上一次的监听器和定时器
+  if (videoCleanup) { videoCleanup(); videoCleanup = null; }
+  if (videoLoadTimer) { clearInterval(videoLoadTimer); videoLoadTimer = null; }
+
   // 重置 UI
   videoEl.pause();
   loadingName.textContent = lead.name;
   loadingPct.textContent = '准备中…';
   loadingBarFill.style.width = '0%';
-  vl.classList.add('show');        // ★ 显示加载动画（一直显示直到视频真正播放）
+  vl.classList.add('show');        // 显示加载动画（一直显示直到视频真正播放）
   retryBtn.classList.remove('show');
   playOverlay.classList.remove('show');
 
-  // 清理旧定时器
-  if (videoLoadTimer) { clearInterval(videoLoadTimer); videoLoadTimer = null; }
-
-  let hasStarted = false;
-
-  // ★ 关键修复：loading 动画一直显示，直到视频真正开始播放（playing 事件）
-  // 之前的代码在 canplay 时就隐藏 loading，但 play() 是异步的
-  // play() 成功前 loading 已隐藏 = 黑屏！
+  // 视频真正开始播放时，隐藏 loading（防黑屏核心）
   function onPlaying() {
     if (token !== videoLoadToken) return;
-    // 视频真正开始播放了，安全地隐藏 loading
     vl.classList.remove('show');
     retryBtn.classList.remove('show');
     playOverlay.classList.remove('show');
   }
 
-  function startPlay() {
-    if (hasStarted) return;
+  function onError() {
     if (token !== videoLoadToken) return;
-    hasStarted = true;
-    clearInterval(videoLoadTimer);
-    videoLoadTimer = null;
-
-    if (videoEl.paused) {
-      const playPromise = videoEl.play();
-      if (playPromise) {
-        playPromise.then(() => {
-          // play() 成功 - loading 会在 'playing' 事件中隐藏
-          // 但如果 'playing' 事件已错过，也在这里隐藏（双重保障）
-          if (token === videoLoadToken && !videoEl.paused) {
-            vl.classList.remove('show');
-            retryBtn.classList.remove('show');
-          }
-        }).catch(() => {
-          // 自动播放被阻止（iOS 等）- 显示播放按钮，隐藏 loading
-          if (token !== videoLoadToken) return;
-          vl.classList.remove('show');
-          retryBtn.classList.remove('show');
-          playOverlay.classList.add('show');
-        });
-      }
-    } else {
-      // 视频已经在播放
-      vl.classList.remove('show');
-      retryBtn.classList.remove('show');
-    }
-  }
-
-  // ★ 监听 'playing' 事件 - 视频真正开始播放时才隐藏 loading（防黑屏核心）
-  videoEl.addEventListener('playing', onPlaying, { once: true });
-
-  // 多事件监听，确保至少一个能触发 startPlay
-  videoEl.addEventListener('canplay', startPlay, { once: true });
-  videoEl.addEventListener('loadeddata', startPlay, { once: true });
-  videoEl.addEventListener('canplaythrough', startPlay, { once: true });
-
-  videoEl.addEventListener('error', function onError() {
-    if (token !== videoLoadToken) return;
-    clearInterval(videoLoadTimer);
-    videoLoadTimer = null;
+    if (videoLoadTimer) { clearInterval(videoLoadTimer); videoLoadTimer = null; }
     vl.classList.remove('show');
     retryBtn.classList.add('show');
-    loadingPct.textContent = '加载失败';
-  }, { once: true });
+    loadingPct.textContent = '加载失败，点重试';
+  }
 
-  // 设置视频源并加载
+  videoEl.addEventListener('playing', onPlaying);
+  videoEl.addEventListener('error', onError);
+  // 保存清理函数，供下次 loadAndPlay 或返回时调用
+  videoCleanup = () => {
+    videoEl.removeEventListener('playing', onPlaying);
+    videoEl.removeEventListener('error', onError);
+  };
+
+  // ★ 核心修复：设置 src 后立即在用户手势上下文中调用 play()
+  // 旧代码等 canplay 事件回调里才调 play()，那时已脱离用户手势 → iOS 拒绝带声音播放
+  // 现在同步调 play()，虽然视频还没加载完，但 play() 返回的 promise 会在准备好后 resolve
+  // 因为是在用户点击的同步上下文中调用，iOS 允许带声音播放
   videoEl.src = lead.video;
   videoEl.load();
 
-  // ★ 移除了之前的"解锁" play() 调用
-  // 旧代码在这里立即调 play()，但视频无数据：
-  // - iOS 上不会解锁音频（没有实际播放），反而可能干扰加载流程
-  // - Android 上用户激活会持续几秒，不需要提前解锁
-  // - 而且提前 play() + load() 可能导致竞态条件
+  const playPromise = videoEl.play();
+  if (playPromise && typeof playPromise.then === 'function') {
+    playPromise.then(() => {
+      // 播放成功 - loading 会在 'playing' 事件中隐藏
+      // 如果 playing 事件已错过（比如视频极小瞬间加载完），这里兜底
+      if (token === videoLoadToken && !videoEl.paused) {
+        vl.classList.remove('show');
+      }
+    }).catch(() => {
+      // 自动播放被阻止（部分 iOS / 静音策略）- 显示手动播放按钮
+      if (token !== videoLoadToken) return;
+      vl.classList.remove('show');
+      retryBtn.classList.remove('show');
+      playOverlay.classList.add('show');
+    });
+  }
 
-  // 进度监控
+  // 进度监控（仅用于显示加载百分比，不再用于触发播放）
   videoLoadTimer = setInterval(() => {
-    if (token !== videoLoadToken) return;
-    // 如果视频已经在播放，隐藏 loading
-    if (!hasStarted && !videoEl.paused && videoEl.currentTime > 0) {
-      startPlay();
-      return;
-    }
-    // 如果 readyState >= 2（有当前帧数据），尝试播放
-    if (!hasStarted && videoEl.readyState >= 2) {
-      startPlay();
+    if (token !== videoLoadToken) {
+      clearInterval(videoLoadTimer);
+      videoLoadTimer = null;
       return;
     }
     if (videoEl.buffered.length > 0) {
@@ -846,12 +818,18 @@ function loadAndPlay(idx) {
       loadingBarFill.style.width = pct + '%';
       loadingPct.textContent = '加载中… ' + Math.floor(pct) + '%';
     }
+    // 兜底：如果视频在播但 loading 还在（playing 事件错过）
+    if (!videoEl.paused && videoEl.currentTime > 0) {
+      vl.classList.remove('show');
+      clearInterval(videoLoadTimer);
+      videoLoadTimer = null;
+    }
   }, 200);
 
-  // 超时保护（30秒后如果仍在加载，显示提示但不移除loading）
+  // 超时保护（30秒后如果仍在加载，显示提示）
   setTimeout(() => {
     if (token !== videoLoadToken) return;
-    if (!hasStarted) {
+    if (vl.classList.contains('show')) {
       loadingPct.textContent = '加载较慢，请耐心等待…';
     }
   }, 30000);
@@ -879,6 +857,7 @@ backBtn.addEventListener('click', () => {
   videoEl.pause();
   videoEl.removeAttribute('src');
   videoEl.load(); // 清理视频源，停止后台加载
+  if (videoCleanup) { videoCleanup(); videoCleanup = null; }
   if (videoLoadTimer) { clearInterval(videoLoadTimer); videoLoadTimer = null; }
   videoPage.style.opacity = ''; // 清理inline style
   showPage(home);
