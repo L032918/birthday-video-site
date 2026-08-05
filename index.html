@@ -2,6 +2,9 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -779,13 +782,13 @@ function loadAndPlay(idx) {
     }
   }, 200);
 
-  // 超时保护（10秒后如果仍在加载，直接尝试播放已有数据）
+  // 超时保护（30秒后如果仍在加载，显示提示但不移除loading）
   setTimeout(() => {
     if (token !== videoLoadToken) return;
     if (!hasStarted) {
-      startPlay();
+      loadingPct.textContent = '加载较慢，请耐心等待…';
     }
-  }, 10000);
+  }, 30000);
 }
 
 // 手动点击播放覆盖层
