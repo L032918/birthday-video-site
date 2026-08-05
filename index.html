@@ -722,10 +722,13 @@ function loadAndPlay(idx) {
     retryBtn.classList.remove('show');
     clearInterval(videoLoadTimer);
     videoLoadTimer = null;
-    videoEl.play().catch(() => {
-      // 自动播放被阻止，显示手动播放覆盖层
-      playOverlay.classList.add('show');
-    });
+    // 如果视频已经在播放，不需要再调用 play()
+    if (videoEl.paused) {
+      videoEl.play().catch(() => {
+        // 自动播放被阻止，显示手动播放覆盖层
+        playOverlay.classList.add('show');
+      });
+    }
   }
 
   // 多事件监听，确保至少一个能触发
@@ -746,9 +749,22 @@ function loadAndPlay(idx) {
   videoEl.src = lead.video;
   videoEl.load();
 
+  // 立即同步调用 play()（在用户点击上下文中"解锁"音频）
+  // 手机浏览器要求 play() 必须在用户交互的同步上下文中调用才能有声
+  // 即使视频还没加载完，这次调用也能"解锁"音频权限
+  const unlockPromise = videoEl.play();
+  if (unlockPromise && unlockPromise.catch) {
+    unlockPromise.catch(() => {});
+  }
+
   // 进度监控
   videoLoadTimer = setInterval(() => {
     if (token !== videoLoadToken) return;
+    // 如果视频已经在播放（unlock 成功），隐藏 loading 层
+    if (!hasStarted && !videoEl.paused) {
+      startPlay();
+      return;
+    }
     // 如果 readyState >= 2（有当前帧数据），尝试播放
     if (!hasStarted && videoEl.readyState >= 2) {
       startPlay();
