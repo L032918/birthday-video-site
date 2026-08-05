@@ -298,14 +298,34 @@ html,body{
 }
 .video-controls button:active{transform:scale(.92)}
 
-/* 手机自动播放覆盖层 */
+/* 手机自动播放覆盖层 - iOS 等不支持自动播放时的 fallback */
 .play-overlay{
-  position:absolute;inset:0;background:rgba(0,0,0,.5);
-  z-index:106;display:none;align-items:center;justify-content:center;
-  cursor:pointer;font-size:64px;color:#fff;
-  text-shadow:0 0 20px rgba(255,255,255,.6);
+  position:absolute;inset:0;background:rgba(0,0,0,.75);
+  z-index:106;display:none;flex-direction:column;
+  align-items:center;justify-content:center;
+  cursor:pointer;gap:16px;
 }
 .play-overlay.show{display:flex}
+.play-overlay-circle{
+  width:90px;height:90px;border-radius:50%;
+  background:rgba(247,212,74,.95);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 30px rgba(247,212,74,.6),0 4px 12px rgba(0,0,0,.5);
+  animation:playPulse 1.5s ease-in-out infinite;
+}
+.play-overlay-circle::before{
+  content:'▶';color:#5d4037;font-size:40px;
+  margin-left:8px;font-weight:bold;
+}
+.play-overlay-text{
+  color:#fff;font-size:20px;font-weight:bold;
+  text-shadow:2px 2px 0 #000,0 0 10px rgba(255,255,255,.3);
+  letter-spacing:2px;
+}
+@keyframes playPulse{
+  0%,100%{transform:scale(1);box-shadow:0 0 30px rgba(247,212,74,.6),0 4px 12px rgba(0,0,0,.5)}
+  50%{transform:scale(1.08);box-shadow:0 0 45px rgba(247,212,74,.8),0 4px 12px rgba(0,0,0,.5)}
+}
 
 /* ========== 烟花页 ========== */
 #fireworks-page{
@@ -431,7 +451,10 @@ html,body{
     <div class="loading-bar"><div class="loading-bar-fill" id="loading-bar-fill"></div></div>
     <button class="retry-btn" id="retry-btn">重试加载</button>
   </div>
-  <div class="play-overlay" id="play-overlay">▶</div>
+  <div class="play-overlay" id="play-overlay">
+    <div class="play-overlay-circle"></div>
+    <div class="play-overlay-text">点击播放</div>
+  </div>
   <button class="back-btn" id="back-btn">← 返回</button>
   <div class="video-controls">
     <button id="prev-btn">◀ 上一个</button>
@@ -724,34 +747,62 @@ function loadAndPlay(idx) {
   loadingName.textContent = lead.name;
   loadingPct.textContent = '准备中…';
   loadingBarFill.style.width = '0%';
-  vl.classList.add('show');
+  vl.classList.add('show');        // ★ 显示加载动画（一直显示直到视频真正播放）
   retryBtn.classList.remove('show');
   playOverlay.classList.remove('show');
 
   // 清理旧定时器
   if (videoLoadTimer) { clearInterval(videoLoadTimer); videoLoadTimer = null; }
 
-  // 先添加事件监听器，再设置 src（避免错过 canplay 事件）
   let hasStarted = false;
+
+  // ★ 关键修复：loading 动画一直显示，直到视频真正开始播放（playing 事件）
+  // 之前的代码在 canplay 时就隐藏 loading，但 play() 是异步的
+  // play() 成功前 loading 已隐藏 = 黑屏！
+  function onPlaying() {
+    if (token !== videoLoadToken) return;
+    // 视频真正开始播放了，安全地隐藏 loading
+    vl.classList.remove('show');
+    retryBtn.classList.remove('show');
+    playOverlay.classList.remove('show');
+  }
 
   function startPlay() {
     if (hasStarted) return;
     if (token !== videoLoadToken) return;
     hasStarted = true;
-    vl.classList.remove('show');
-    retryBtn.classList.remove('show');
     clearInterval(videoLoadTimer);
     videoLoadTimer = null;
-    // 如果视频已经在播放，不需要再调用 play()
+
     if (videoEl.paused) {
-      videoEl.play().catch(() => {
-        // 自动播放被阻止，显示手动播放覆盖层
-        playOverlay.classList.add('show');
-      });
+      const playPromise = videoEl.play();
+      if (playPromise) {
+        playPromise.then(() => {
+          // play() 成功 - loading 会在 'playing' 事件中隐藏
+          // 但如果 'playing' 事件已错过，也在这里隐藏（双重保障）
+          if (token === videoLoadToken && !videoEl.paused) {
+            vl.classList.remove('show');
+            retryBtn.classList.remove('show');
+          }
+        }).catch(() => {
+          // 自动播放被阻止（iOS 等）- 显示播放按钮，隐藏 loading
+          if (token !== videoLoadToken) return;
+          vl.classList.remove('show');
+          retryBtn.classList.remove('show');
+          playOverlay.classList.add('show');
+        });
+      }
+    } else {
+      // 视频已经在播放
+      vl.classList.remove('show');
+      retryBtn.classList.remove('show');
     }
   }
 
-  // 多事件监听，确保至少一个能触发
+  // ★ 监听 'playing' 事件 - 视频真正开始播放时才隐藏 loading（防黑屏核心）
+  videoEl.addEventListener('playing', onPlaying, { once: true });
+
+  // 多事件监听，确保至少一个能触发 startPlay
   videoEl.addEventListener('canplay', startPlay, { once: true });
   videoEl.addEventListener('loadeddata', startPlay, { once: true });
   videoEl.addEventListener('canplaythrough', startPlay, { once: true });
@@ -765,23 +816,21 @@ function loadAndPlay(idx) {
     loadingPct.textContent = '加载失败';
   }, { once: true });
 
-  // 设置视频源并加载（只调用一次 load）
+  // 设置视频源并加载
   videoEl.src = lead.video;
   videoEl.load();
 
-  // 立即同步调用 play()（在用户点击上下文中"解锁"音频）
-  // 手机浏览器要求 play() 必须在用户交互的同步上下文中调用才能有声
-  // 即使视频还没加载完，这次调用也能"解锁"音频权限
-  const unlockPromise = videoEl.play();
-  if (unlockPromise && unlockPromise.catch) {
-    unlockPromise.catch(() => {});
-  }
+  // ★ 移除了之前的"解锁" play() 调用
+  // 旧代码在这里立即调 play()，但视频无数据：
+  // - iOS 上不会解锁音频（没有实际播放），反而可能干扰加载流程
+  // - Android 上用户激活会持续几秒，不需要提前解锁
+  // - 而且提前 play() + load() 可能导致竞态条件
 
   // 进度监控
   videoLoadTimer = setInterval(() => {
     if (token !== videoLoadToken) return;
-    // 如果视频已经在播放（unlock 成功），隐藏 loading 层
-    if (!hasStarted && !videoEl.paused) {
+    // 如果视频已经在播放，隐藏 loading
+    if (!hasStarted && !videoEl.paused && videoEl.currentTime > 0) {
       startPlay();
       return;
     }
@@ -808,10 +857,16 @@ function loadAndPlay(idx) {
   }, 30000);
 }
 
-// 手动点击播放覆盖层
+// 手动点击播放覆盖层（iOS 自动播放被阻止时的 fallback）
 playOverlay.addEventListener('click', () => {
   playOverlay.classList.remove('show');
-  videoEl.play().catch(() => {});
+  // 用户点击 = 真实用户手势，play() 应该能成功
+  videoEl.play().then(() => {
+    // 播放成功
+  }).catch(() => {
+    // 如果还是失败（视频可能还没加载好），重新显示按钮
+    playOverlay.classList.add('show');
+  });
 });
 
 // 重试按钮
