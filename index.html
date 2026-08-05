@@ -304,24 +304,6 @@ html,body{
 }
 .play-overlay.show{display:flex}
 
-/* 开启声音按钮 */
-.unmute-btn{
-  position:absolute;top:20px;right:20px;z-index:111;
-  background:rgba(0,0,0,.6);border:2px solid var(--coin);
-  color:var(--coin-light);padding:10px 18px;
-  font-family:inherit;font-size:16px;font-weight:bold;cursor:pointer;
-  text-shadow:2px 2px 0 #000;box-shadow:3px 3px 0 rgba(0,0,0,.5);
-  border-radius:4px;min-width:44px;min-height:44px;
-  transition:transform .1s;display:none;
-  animation:unmutePulse 1.5s ease-in-out infinite;
-}
-.unmute-btn.show{display:block}
-.unmute-btn:active{transform:scale(.92)}
-@keyframes unmutePulse{
-  0%,100%{box-shadow:3px 3px 0 rgba(0,0,0,.5),0 0 8px rgba(247,212,74,.4)}
-  50%{box-shadow:3px 3px 0 rgba(0,0,0,.5),0 0 20px rgba(247,212,74,.8)}
-}
-
 /* ========== 烟花页 ========== */
 #fireworks-page{
   background:linear-gradient(to bottom,#0a0e27 0%,#1a1a3e 50%,#0d1b2a 100%);
@@ -438,7 +420,7 @@ html,body{
 
 <!-- ========== 视频播放页 ========== -->
 <div id="video-page" class="page">
-  <video id="video-el" playsinline webkit-playsinline x5-playsinline preload="metadata" muted></video>
+  <video id="video-el" playsinline webkit-playsinline x5-playsinline preload="auto"></video>
   <div class="video-loading" id="video-loading">
     <div class="video-loading-box"></div>
     <div class="loading-name" id="loading-name"></div>
@@ -448,7 +430,6 @@ html,body{
   </div>
   <div class="play-overlay" id="play-overlay">▶</div>
   <button class="back-btn" id="back-btn">← 返回</button>
-  <button class="unmute-btn" id="unmute-btn">🔊 点击开启声音</button>
   <div class="video-controls">
     <button id="prev-btn">◀ 上一个</button>
     <button id="replay-btn">🔄 重放</button>
@@ -507,7 +488,6 @@ const videoPage = $('video-page'), videoEl = $('video-el');
 const vl = $('video-loading'), playOverlay = $('play-overlay');
 const backBtn = $('back-btn'), prevBtn = $('prev-btn');
 const replayBtn = $('replay-btn'), nextBtn = $('next-btn');
-const unmuteBtn = $('unmute-btn');
 const loadingName = $('loading-name'), loadingPct = $('loading-pct');
 const loadingBarFill = $('loading-bar-fill'), retryBtn = $('retry-btn');
 const fwPage = $('fireworks-page'), fwCanvas = $('fw-canvas');
@@ -729,20 +709,15 @@ function loadAndPlay(idx) {
   vl.classList.add('show');
   retryBtn.classList.remove('show');
   playOverlay.classList.remove('show');
-  unmuteBtn.classList.remove('show');
 
   // 清理旧定时器
   if (videoLoadTimer) { clearInterval(videoLoadTimer); videoLoadTimer = null; }
-
-  // 确保视频静音（自动播放需要）
-  videoEl.muted = true;
 
   // 设置视频源
   videoEl.src = lead.video;
   videoEl.load();
 
   // 进度监控
-  let lastTime = 0, stallCount = 0;
   videoLoadTimer = setInterval(() => {
     if (token !== videoLoadToken) return;
     if (videoEl.buffered.length > 0) {
@@ -751,41 +726,20 @@ function loadAndPlay(idx) {
       const pct = Math.min(100, (buffered / duration) * 100);
       loadingBarFill.style.width = pct + '%';
       loadingPct.textContent = '加载中… ' + Math.floor(pct) + '%';
-
-      // 检测卡顿
-      if (buffered === lastTime) {
-        stallCount++;
-        if (stallCount > 30) { // ~6秒无进展
-          loadingPct.textContent = '网络较慢，正在努力加载… ' + Math.floor(pct) + '%';
-        }
-      } else {
-        stallCount = 0;
-      }
-      lastTime = buffered;
-
-      // 缓冲足够（至少3秒或100%）就开始播放
-      if (pct >= 100 || buffered >= Math.min(3, duration)) {
-        if (vl.classList.contains('show')) {
-          vl.classList.remove('show');
-          retryBtn.classList.remove('show');
-          clearInterval(videoLoadTimer);
-          videoLoadTimer = null;
-          attemptPlay();
-        }
-      }
     }
   }, 200);
 
-  // 可以播放时（备选触发）
+  // 可以播放时立即播放（有声）
   const onCanPlay = () => {
     if (token !== videoLoadToken) return;
-    if (vl.classList.contains('show')) {
-      vl.classList.remove('show');
-      retryBtn.classList.remove('show');
-      clearInterval(videoLoadTimer);
-      videoLoadTimer = null;
-      attemptPlay();
-    }
+    vl.classList.remove('show');
+    retryBtn.classList.remove('show');
+    clearInterval(videoLoadTimer);
+    videoLoadTimer = null;
+    videoEl.play().catch(() => {
+      // 自动播放被阻止，显示手动播放覆盖层
+      playOverlay.classList.add('show');
+    });
   };
 
   // 错误处理
@@ -801,44 +755,24 @@ function loadAndPlay(idx) {
   videoEl.addEventListener('canplay', onCanPlay, { once: true });
   videoEl.addEventListener('error', onError, { once: true });
 
-  // 超时保护（20秒后如果仍在加载，直接尝试播放已有数据）
+  // 超时保护（15秒后如果仍在加载，直接尝试播放已有数据）
   setTimeout(() => {
     if (token !== videoLoadToken) return;
     if (vl.classList.contains('show')) {
       vl.classList.remove('show');
       clearInterval(videoLoadTimer);
       videoLoadTimer = null;
-      attemptPlay();
-    }
-  }, 20000);
-
-  function attemptPlay() {
-    const p = videoEl.play();
-    if (p && p.catch) {
-      p.then(() => {
-        playOverlay.classList.remove('show');
-        // 播放成功后，显示开启声音按钮
-        unmuteBtn.classList.add('show');
-      }).catch(() => {
-        // 自动播放被阻止，显示覆盖层让用户手动点击
+      videoEl.play().catch(() => {
         playOverlay.classList.add('show');
       });
-    } else {
-      unmuteBtn.classList.add('show');
     }
-  }
+  }, 15000);
 }
 
 // 手动点击播放覆盖层
 playOverlay.addEventListener('click', () => {
   playOverlay.classList.remove('show');
   videoEl.play().catch(() => {});
-});
-
-// 开启声音按钮
-unmuteBtn.addEventListener('click', () => {
-  videoEl.muted = false;
-  unmuteBtn.classList.remove('show');
 });
 
 // 重试按钮
@@ -849,7 +783,6 @@ retryBtn.addEventListener('click', () => {
 // 返回按钮
 backBtn.addEventListener('click', () => {
   videoEl.pause();
-  unmuteBtn.classList.remove('show');
   showPage(home);
 });
 
