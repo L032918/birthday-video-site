@@ -701,8 +701,6 @@ function loadAndPlay(idx) {
 
   // 重置 UI
   videoEl.pause();
-  videoEl.removeAttribute('src');
-  videoEl.load();
   loadingName.textContent = lead.name;
   loadingPct.textContent = '准备中…';
   loadingBarFill.style.width = '0%';
@@ -713,13 +711,49 @@ function loadAndPlay(idx) {
   // 清理旧定时器
   if (videoLoadTimer) { clearInterval(videoLoadTimer); videoLoadTimer = null; }
 
-  // 设置视频源
+  // 先添加事件监听器，再设置 src（避免错过 canplay 事件）
+  let hasStarted = false;
+
+  function startPlay() {
+    if (hasStarted) return;
+    if (token !== videoLoadToken) return;
+    hasStarted = true;
+    vl.classList.remove('show');
+    retryBtn.classList.remove('show');
+    clearInterval(videoLoadTimer);
+    videoLoadTimer = null;
+    videoEl.play().catch(() => {
+      // 自动播放被阻止，显示手动播放覆盖层
+      playOverlay.classList.add('show');
+    });
+  }
+
+  // 多事件监听，确保至少一个能触发
+  videoEl.addEventListener('canplay', startPlay, { once: true });
+  videoEl.addEventListener('loadeddata', startPlay, { once: true });
+  videoEl.addEventListener('canplaythrough', startPlay, { once: true });
+
+  videoEl.addEventListener('error', function onError() {
+    if (token !== videoLoadToken) return;
+    clearInterval(videoLoadTimer);
+    videoLoadTimer = null;
+    vl.classList.remove('show');
+    retryBtn.classList.add('show');
+    loadingPct.textContent = '加载失败';
+  }, { once: true });
+
+  // 设置视频源并加载（只调用一次 load）
   videoEl.src = lead.video;
   videoEl.load();
 
   // 进度监控
   videoLoadTimer = setInterval(() => {
     if (token !== videoLoadToken) return;
+    // 如果 readyState >= 2（有当前帧数据），尝试播放
+    if (!hasStarted && videoEl.readyState >= 2) {
+      startPlay();
+      return;
+    }
     if (videoEl.buffered.length > 0) {
       const buffered = videoEl.buffered.end(videoEl.buffered.length - 1);
       const duration = videoEl.duration || 1;
@@ -729,44 +763,13 @@ function loadAndPlay(idx) {
     }
   }, 200);
 
-  // 可以播放时立即播放（有声）
-  const onCanPlay = () => {
-    if (token !== videoLoadToken) return;
-    vl.classList.remove('show');
-    retryBtn.classList.remove('show');
-    clearInterval(videoLoadTimer);
-    videoLoadTimer = null;
-    videoEl.play().catch(() => {
-      // 自动播放被阻止，显示手动播放覆盖层
-      playOverlay.classList.add('show');
-    });
-  };
-
-  // 错误处理
-  const onError = () => {
-    if (token !== videoLoadToken) return;
-    clearInterval(videoLoadTimer);
-    videoLoadTimer = null;
-    vl.classList.remove('show');
-    retryBtn.classList.add('show');
-    loadingPct.textContent = '加载失败';
-  };
-
-  videoEl.addEventListener('canplay', onCanPlay, { once: true });
-  videoEl.addEventListener('error', onError, { once: true });
-
-  // 超时保护（15秒后如果仍在加载，直接尝试播放已有数据）
+  // 超时保护（10秒后如果仍在加载，直接尝试播放已有数据）
   setTimeout(() => {
     if (token !== videoLoadToken) return;
-    if (vl.classList.contains('show')) {
-      vl.classList.remove('show');
-      clearInterval(videoLoadTimer);
-      videoLoadTimer = null;
-      videoEl.play().catch(() => {
-        playOverlay.classList.add('show');
-      });
+    if (!hasStarted) {
+      startPlay();
     }
-  }, 15000);
+  }, 10000);
 }
 
 // 手动点击播放覆盖层
