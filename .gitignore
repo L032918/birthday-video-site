@@ -1,0 +1,26 @@
+# Python scripts
+*.py
+
+# Batch files
+*.bat
+
+# Binaries
+*.exe
+cloudflared.exe
+
+# Backups
+videos_backup_original/
+videos_backup/
+
+# Old/unused HTML files
+birthday.html
+mobile.html
+final.html
+生日.html
+生日惊喜.html
+生成超级玛丽风格生日网页.html
+
+# Debug/test files
+debug.html
+debug2.html
+test.html
